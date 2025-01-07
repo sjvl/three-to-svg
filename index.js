@@ -1,7 +1,4 @@
-import { Box3, WebGLRenderer, Scene, DirectionalLight, AmbientLight, Group, 
-    MeshStandardMaterial, MeshBasicMaterial, BufferGeometry, LineSegments, 
-    LineBasicMaterial, OrthographicCamera, Vector3, Mesh, Float32BufferAttribute, Line3 } 
-from 'three';
+import { Box3, WebGLRenderer, Scene, DirectionalLight, AmbientLight, Group, MeshStandardMaterial, BufferGeometry, LineSegments, LineBasicMaterial, OrthographicCamera, Vector3, Mesh, Float32BufferAttribute } from 'three';
 import { GUI } from 'https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/libs/lil-gui.module.min.js';
 import { mergeGeometries } from 'https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/utils/BufferGeometryUtils.js';
 import { STLLoader } from 'https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/loaders/STLLoader.js';
