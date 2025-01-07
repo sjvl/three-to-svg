@@ -1,5 +1,5 @@
 import { Vector3, Line3, Plane } from 'three';
-import { ExtendedTriangle } from 'three-mesh-bvh';
+import { ExtendedTriangle } from '../three-mesh-bvh.js';
 
 const AREA_EPSILON = 1e-16;
 const DIST_EPSILON = 1e-16;

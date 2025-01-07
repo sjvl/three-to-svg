@@ -4,13 +4,16 @@ import {
 	Line3,
 	Ray,
 	BufferAttribute,
-} from 'three';
-import { MeshBVH } from 'three-mesh-bvh';
+  } from 'three';
+
+import { MeshBVH } from './three-mesh-bvh.js';
+
 import {
 	isYProjectedTriangleDegenerate,
 	isLineTriangleEdge,
 	isYProjectedLineDegenerate,
 } from './utils/triangleLineUtils.js';
+
 import { generateEdges } from './utils/generateEdges.js';
 import { compressEdgeOverlaps, overlapsToLines } from './utils/overlapUtils.js';
 import { trimToBeneathTriPlane } from './utils/trimToBeneathTriPlane.js';

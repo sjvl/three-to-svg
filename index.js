@@ -1,24 +1,12 @@
-import {
-	Box3,
-	WebGLRenderer,
-	Scene,
-	DirectionalLight,
-	AmbientLight,
-	Group,
-	MeshStandardMaterial,
-	MeshBasicMaterial,
-	BufferGeometry,
-	LineSegments,
-	LineBasicMaterial,
-	OrthographicCamera,
-	Vector3,
-	Mesh,
-	Float32BufferAttribute,
-} from 'three';
-import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { ProjectionGenerator } from '../src/index.js';
-import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
+import { Box3, WebGLRenderer, Scene, DirectionalLight, AmbientLight, Group, 
+    MeshStandardMaterial, MeshBasicMaterial, BufferGeometry, LineSegments, 
+    LineBasicMaterial, OrthographicCamera, Vector3, Mesh, Float32BufferAttribute, Line3 } 
+from 'three';
+import { GUI } from 'https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/libs/lil-gui.module.min.js';
+import { mergeGeometries } from 'https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/utils/BufferGeometryUtils.js';
+import { STLLoader } from 'https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/loaders/STLLoader.js';
+
+import { ProjectionGenerator } from './ProjectionGenerator.js';
 
 class CustomControls {
     constructor(object, domElement, camera) {
@@ -236,7 +224,7 @@ async function loadSTL(url) {
 	});
 }
 
-let renderer, camera, scene, gui;
+let renderer, camera, scene, gui, controls;
 let model, projection, group, shadedWhiteModel, whiteModel;
 let outputContainer;
 let task = null;
@@ -270,8 +258,8 @@ async function init() {
     scene.add(group);
 
     // Charger le STL
-    // model = await loadSTL('https://raw.githubusercontent.com/photonsters/Slicer/master/STLs/bunny.stl');
-	model = await loadSTL('https://raw.githubusercontent.com/ChrisC413/bitey-bunny/master/bitey%20bunny.stl');
+    model = await loadSTL('https://raw.githubusercontent.com/photonsters/Slicer/master/STLs/bunny.stl');
+	// model = await loadSTL('https://raw.githubusercontent.com/ChrisC413/bitey-bunny/master/bitey%20bunny.stl');
 
 
 	
@@ -352,7 +340,6 @@ async function init() {
     camera.lookAt(0, 0, 0);
     camera.updateProjectionMatrix();
 
-    // controls
     controls = new CustomControls(group, renderer.domElement, camera);
 
     gui = new GUI();

@@ -1,5 +1,5 @@
 import { Line3 } from 'three';
-import { ExtendedTriangle } from 'three-mesh-bvh';
+import { ExtendedTriangle } from '../three-mesh-bvh.js';
 import { isLineTriangleEdge } from './triangleLineUtils.js';
 
 const OFFSET_EPSILON = 1e-6;
