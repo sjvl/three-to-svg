@@ -18,21 +18,18 @@ class CustomControls {
         this.zoomSpeed = 1.0;
         this.enabled = true;
         
-        // État interne
         this.isMouseDown = false;
         this.mouseX = 0;
         this.mouseY = 0;
         
-        // Lier les méthodes au contexte
         this.onMouseDown = this.onMouseDown.bind(this);
         this.onMouseMove = this.onMouseMove.bind(this);
         this.onMouseUp = this.onMouseUp.bind(this);
         this.onWheel = this.onWheel.bind(this);
 
-		this.isProjecting = false;  // Nouvel état
-        this.projectionTimeout = null;  // Pour gérer le délai
+		this.isProjecting = false;
+        this.projectionTimeout = null;
         
-        // Ajouter les écouteurs d'événements
         this.domElement.addEventListener('mousedown', this.onMouseDown);
         document.addEventListener('mousemove', this.onMouseMove);
         document.addEventListener('mouseup', this.onMouseUp);
@@ -45,13 +42,11 @@ class CustomControls {
         this.mouseX = event.clientX;
         this.mouseY = event.clientY;
         
-        // S'assurer que la projection existante est nettoyée
         if (projection && projection.geometry) {
             projection.geometry.dispose();
             projection.geometry = new BufferGeometry();
         }
         
-        // Afficher le modèle, cacher la projection
         model.visible = params.displayModel === 'color';
         shadedWhiteModel.visible = params.displayModel === 'shaded white';
         whiteModel.visible = params.displayModel === 'white';
@@ -64,13 +59,11 @@ class CustomControls {
 		const deltaX = event.clientX - this.mouseX;
 		const deltaY = event.clientY - this.mouseY;
 		
-		// Rotation horizontale autour de l'axe X (puisqu'on est en vue de dessus)
 		this.object.rotateOnWorldAxis(
 			new Vector3(0, 0, 1), 
 			-deltaX * 0.01 * this.rotationSpeed
 		);
 		
-		// Rotation verticale autour de l'axe Z
 		this.object.rotateOnWorldAxis(
 			new Vector3(1, 0, 0), 
 			deltaY * 0.01 * this.rotationSpeed
@@ -84,21 +77,19 @@ class CustomControls {
     onMouseUp() {
         this.isMouseDown = false;
         
-        // Attendre un peu avant de lancer la projection
         if (this.projectionTimeout) {
             clearTimeout(this.projectionTimeout);
         }
         
         this.projectionTimeout = setTimeout(async () => {
-            if (!this.isMouseDown) {  // Double vérification
+            if (!this.isMouseDown) {
                 await runUpdateEdges(30);
-                // Cacher le modèle, montrer la projection
                 model.visible = false;
                 shadedWhiteModel.visible = false;
                 whiteModel.visible = false;
                 projection.visible = true;
             }
-        }, 500);  // Délai de 500ms
+        }, 500);
     }
     
     onWheel(event) {
@@ -106,7 +97,6 @@ class CustomControls {
         
         event.preventDefault();
         
-        // Ajuster le frustum de la caméra pour le zoom
         const zoomFactor = 1.1;
         const direction = event.deltaY > 0 ? zoomFactor : 1 / zoomFactor;
         
@@ -125,62 +115,6 @@ class CustomControls {
     }
 }
 
-async function exportProjectionToSVG() {
-    // Récupérer les positions des points de la projection
-    const positions = projection.geometry.attributes.position.array;
-    const lines = [];
-    
-    // Calculer les dimensions pour le viewBox
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (let i = 0; i < positions.length; i += 3) {
-        const x = positions[i];
-        const z = positions[i + 2];
-        minX = Math.min(minX, x);
-        maxX = Math.max(maxX, x);
-        minY = Math.min(minY, z);
-        maxY = Math.max(maxY, z);
-    }
-    
-    // Définir une taille cible en pixels
-    const targetWidth = 1000;
-    const scale = targetWidth / (maxX - minX);
-    
-    // Créer les lignes SVG avec mise à l'échelle
-    for (let i = 0; i < positions.length; i += 6) {
-        const x1 = positions[i] * scale;
-        const z1 = positions[i + 2] * scale;
-        const x2 = positions[i + 3] * scale;
-        const z2 = positions[i + 5] * scale;
-        
-        // Ne garder que les lignes visibles (non dégénérées)
-        if (Math.abs(x1 - x2) > 0.0001 || Math.abs(z1 - z2) > 0.0001) {
-            lines.push(`<line x1="${x1}" y1="${z1}" x2="${x2}" y2="${z2}" />`);
-        }
-    }
-    
-    const margin = targetWidth * 0.1; // 10% de marge
-    const viewBoxWidth = (maxX - minX) * scale + 2 * margin;
-    const viewBoxHeight = (maxY - minY) * scale + 2 * margin;
-    
-    // Créer le SVG
-    const svg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" 
-     viewBox="${minX * scale - margin} ${minY * scale - margin} ${viewBoxWidth} ${viewBoxHeight}">
-  <g stroke="black" stroke-width="1" fill="none">
-    ${lines.join('\n    ')}
-  </g>
-</svg>`;
-    
-    // Télécharger le SVG
-    const blob = new Blob([svg], {type: 'image/svg+xml'});
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'projection.svg';
-    link.click();
-    URL.revokeObjectURL(url);
-}
-
 const params = {
 	threshold: 50,
 	displayModel: 'color',
@@ -188,6 +122,127 @@ const params = {
 	sortEdges: true,
 	includeIntersectionEdges: true,
 };
+
+let renderer, camera, scene, gui, controls;
+let model, projection, group, shadedWhiteModel, whiteModel;
+let outputContainer;
+let task = null;
+
+init();
+
+async function init() {
+    outputContainer = document.getElementById('output');
+    const bgColor = 0xeeeeee;
+
+    // renderer setup
+    renderer = new WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setClearColor(bgColor, 1);
+    document.body.appendChild(renderer.domElement);
+
+    // scene setup
+    scene = new Scene();
+
+    // lights
+    const light = new DirectionalLight(0xffffff, 3.5);
+    light.position.set(0, 1, 0);
+    scene.add(light);
+
+    const ambientLight = new AmbientLight(0xb0bec5, 1);
+    scene.add(ambientLight);
+
+    group = new Group();
+    scene.add(group);
+
+    // STL 
+    model = await loadSTL('https://raw.githubusercontent.com/photonsters/Slicer/master/STLs/bunny.stl');
+	// model = await loadSTL('https://raw.githubusercontent.com/ChrisC413/bitey-bunny/master/bitey%20bunny.stl');	
+
+    const boxM = new Box3();
+    boxM.setFromObject(model);
+    const sizeM = new Vector3();
+    boxM.getSize(sizeM);
+    const centerM = new Vector3();
+    boxM.getCenter(centerM);
+    model.position.sub(centerM);
+
+    const whiteMaterial = new MeshStandardMaterial({
+        polygonOffset: true,
+        polygonOffsetFactor: 1,
+        polygonOffsetUnits: 1,
+    });
+    shadedWhiteModel = model.clone();
+    shadedWhiteModel.traverse(c => {
+        if (c.material) {
+            c.material = whiteMaterial;
+        }
+    });
+
+    // center group
+    const box = new Box3();
+    box.setFromObject(model, true);
+    const size = new Vector3();
+    box.getSize(size);
+    const maxDim = Math.max(size.x, size.y, size.z);
+    box.getCenter(group.position).multiplyScalar(-1);
+    group.position.y = Math.max(0, -box.min.y) + 1;
+
+    // inital rotation
+    group.rotateOnWorldAxis(new Vector3(1, 0, 0), Math.PI);
+    group.rotateOnWorldAxis(new Vector3(0, 0, 1), Math.PI/3.6);
+
+    group.add(model, shadedWhiteModel, whiteModel);
+
+    // create projection display mesh
+    projection = new LineSegments(new BufferGeometry(), new LineBasicMaterial({ color: 0x030303 }));
+	projection.name = 'mainProjection';  // ajouter cet identifiant
+    scene.add(projection);
+
+    // camera setup
+    const aspect = window.innerWidth / window.innerHeight;
+    const distance = maxDim ;
+
+    camera = new OrthographicCamera(
+        -distance * aspect,
+        distance * aspect,
+        distance,
+        -distance,
+        0.01,
+        maxDim * 10
+    );
+
+    camera.position.set(0, distance, 0);
+    camera.lookAt(0, 0, 0);
+    camera.updateProjectionMatrix();
+
+
+    // controls
+    controls = new CustomControls(group, renderer.domElement, camera);
+    gui = new GUI();
+	gui.add(params, 'threshold', 1, 100).step(1).name('threshold');
+    gui.add({ exportSVG: function() { exportProjectionToSVG(); }}, 'exportSVG');
+
+    render();
+
+	// init projection
+    await runUpdateEdges(30);
+    model.visible = false;
+    shadedWhiteModel.visible = false;
+    whiteModel.visible = false;
+    projection.visible = true;
+
+    // resize handler
+    window.addEventListener('resize', function() {
+        const aspect = window.innerWidth / window.innerHeight;
+        camera.left = -distance * aspect;
+        camera.right = distance * aspect;
+        camera.top = distance;
+        camera.bottom = -distance;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+}
 
 async function loadSTL(url) {
 	return new Promise((resolve, reject) => {
@@ -222,151 +277,6 @@ async function loadSTL(url) {
 				reject(error);
 			});
 	});
-}
-
-let renderer, camera, scene, gui, controls;
-let model, projection, group, shadedWhiteModel, whiteModel;
-let outputContainer;
-let task = null;
-
-init();
-
-async function init() {
-    outputContainer = document.getElementById('output');
-    const bgColor = 0xeeeeee;
-
-    // renderer setup
-    renderer = new WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setClearColor(bgColor, 1);
-    document.body.appendChild(renderer.domElement);
-
-    // scene setup
-    scene = new Scene();
-
-    // lights
-    const light = new DirectionalLight(0xffffff, 3.5);
-    light.position.set(0, 1, 0);
-    scene.add(light);
-
-    const ambientLight = new AmbientLight(0xb0bec5, 1);
-    scene.add(ambientLight);
-
-    // load model
-    group = new Group();
-    scene.add(group);
-
-    // Charger le STL
-    model = await loadSTL('https://raw.githubusercontent.com/photonsters/Slicer/master/STLs/bunny.stl');
-	// model = await loadSTL('https://raw.githubusercontent.com/ChrisC413/bitey-bunny/master/bitey%20bunny.stl');
-
-
-	
-
-    // Debug de la boîte englobante
-    const boxM = new Box3();
-    boxM.setFromObject(model);
-    const sizeM = new Vector3();
-    boxM.getSize(sizeM);
-    const centerM = new Vector3();
-    boxM.getCenter(centerM);
-
-    // Centrer le modèle
-    model.position.sub(centerM);
-
-    const whiteMaterial = new MeshStandardMaterial({
-        polygonOffset: true,
-        polygonOffsetFactor: 1,
-        polygonOffsetUnits: 1,
-    });
-    shadedWhiteModel = model.clone();
-    shadedWhiteModel.traverse(c => {
-        if (c.material) {
-            c.material = whiteMaterial;
-        }
-    });
-
-    const whiteBasicMaterial = new MeshBasicMaterial({
-        polygonOffset: true,
-        polygonOffsetFactor: 1,
-        polygonOffsetUnits: 1,
-    });
-    whiteModel = model.clone();
-    whiteModel.traverse(c => {
-        if (c.material) {
-            c.material = whiteBasicMaterial;
-        }
-    });
-
-    group.updateMatrixWorld(true);
-
-    // center group
-    const box = new Box3();
-    box.setFromObject(model, true);
-    const size = new Vector3();
-    box.getSize(size);
-    const maxDim = Math.max(size.x, size.y, size.z);
-
-    box.getCenter(group.position).multiplyScalar(-1);
-    group.position.y = Math.max(0, -box.min.y) + 1;
-
-    // Rotation initiale
-    group.rotateOnWorldAxis(new Vector3(1, 0, 0), -Math.PI);
-    group.rotateOnWorldAxis(new Vector3(0, 0, 1), Math.PI/5);
-
-    group.add(model, shadedWhiteModel, whiteModel);
-
-    // create projection display mesh
-    projection = new LineSegments(new BufferGeometry(), new LineBasicMaterial({ color: 0x030303 }));
-	projection.name = 'mainProjection';  // ajouter cet identifiant
-    scene.add(projection);
-
-
-    // Ajuster la caméra en fonction des dimensions du modèle
-    const aspect = window.innerWidth / window.innerHeight;
-    const distance = maxDim ;
-
-    camera = new OrthographicCamera(
-        -distance * aspect,
-        distance * aspect,
-        distance,
-        -distance,
-        0.01,
-        maxDim * 10
-    );
-
-    camera.position.set(0, distance, 0);
-    camera.lookAt(0, 0, 0);
-    camera.updateProjectionMatrix();
-
-    controls = new CustomControls(group, renderer.domElement, camera);
-
-    gui = new GUI();
-	gui.add(params, 'threshold', 1, 50).name('threshold');
-    gui.add({ exportSVG: function() { exportProjectionToSVG(); }}, 'exportSVG');
-
-    render();
-
-	// Faire la projection initiale
-    await runUpdateEdges(30);
-
-    // Cacher le modèle, montrer la projection
-    model.visible = false;
-    shadedWhiteModel.visible = false;
-    whiteModel.visible = false;
-    projection.visible = true;
-
-    // Handler de redimensionnement
-    window.addEventListener('resize', function() {
-        const aspect = window.innerWidth / window.innerHeight;
-        camera.left = -distance * aspect;
-        camera.right = distance * aspect;
-        camera.top = distance;
-        camera.bottom = -distance;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-    });
 }
 
 function* updateEdges( runTime = 30 ) {
@@ -473,10 +383,8 @@ function runUpdateEdges(runTime = 30) {
 		const result = iterator.next();
   
 		if (!result.done) {
-		  // Si ce n'est pas terminé, continuer à exécuter les étapes
 		  requestAnimationFrame(runNextStep);
 		} else {
-		  // Si terminé, résoudre la promesse
 		  resolve();
 		}
 	  }
@@ -485,17 +393,59 @@ function runUpdateEdges(runTime = 30) {
 	});
 }
 
-function render() {
-
-	requestAnimationFrame(render);
+async function exportProjectionToSVG() {
+    const positions = projection.geometry.attributes.position.array;
+    const lines = [];
     
-    if (task) {
-        const res = task.next();
-        if (res.done) {
-            task = null;
+    // viewBox dimentions
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (let i = 0; i < positions.length; i += 3) {
+        const x = positions[i];
+        const z = positions[i + 2];
+        minX = Math.min(minX, x);
+        maxX = Math.max(maxX, x);
+        minY = Math.min(minY, z);
+        maxY = Math.max(maxY, z);
+    }
+    const targetWidth = 1000;
+    const scale = targetWidth / (maxX - minX);
+    
+    // draw svg lines
+    for (let i = 0; i < positions.length; i += 6) {
+        const x1 = positions[i] * scale;
+        const z1 = positions[i + 2] * scale;
+        const x2 = positions[i + 3] * scale;
+        const z2 = positions[i + 5] * scale;
+
+        if (Math.abs(x1 - x2) > 0.0001 || Math.abs(z1 - z2) > 0.0001) {
+            lines.push(`<line x1="${x1}" y1="${z1}" x2="${x2}" y2="${z2}" />`);
         }
     }
+    
+    const margin = targetWidth * 0.1; // margin 10%
+    const viewBoxWidth = (maxX - minX) * scale + 2 * margin;
+    const viewBoxHeight = (maxY - minY) * scale + 2 * margin;
+    
+    // init SVG
+    const svg = `<?xml version="1.0" encoding="UTF-8"?>
+    <svg xmlns="http://www.w3.org/2000/svg" 
+        viewBox="${minX * scale - margin} ${minY * scale - margin} ${viewBoxWidth} ${viewBoxHeight}">
+    <g stroke="black" stroke-width="1" fill="none">
+        ${lines.join('\n    ')}
+    </g>
+    </svg>`;
+    
+    // SVG download
+    const blob = new Blob([svg], {type: 'image/svg+xml'});
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'projection.svg';
+    link.click();
+    URL.revokeObjectURL(url);
+}
 
+function render() {
+	requestAnimationFrame(render);
     renderer.render(scene, camera);
-
 }
