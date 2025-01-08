@@ -1,4 +1,4 @@
-import { DoubleSide, Box3, WebGLRenderer, Scene, DirectionalLight, AmbientLight, Group, MeshStandardMaterial, BufferGeometry, LineSegments, LineBasicMaterial, OrthographicCamera, Vector3, Mesh, Float32BufferAttribute, SphereGeometry, BoxGeometry, PlaneGeometry } from 'three';
+import { Box3, WebGLRenderer, Scene, DirectionalLight, AmbientLight, Group, MeshStandardMaterial, BufferGeometry, LineSegments, LineBasicMaterial, OrthographicCamera, Vector3, Mesh, Float32BufferAttribute, PlaneGeometry } from 'three';
 import { GUI } from 'https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/libs/lil-gui.module.min.js';
 import { mergeGeometries } from 'https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/utils/BufferGeometryUtils.js';
 import { STLLoader } from 'https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/loaders/STLLoader.js';
@@ -349,7 +349,7 @@ async function loadScene() {
             const vertices = geometry.attributes.position.array;
 
             for ( let i = 0, j = 0, l = vertices.length; i < l; i ++, j += 3 ) {
-                vertices[ j + 1 ] = data[ i ] * 1;
+                vertices[ j + 1 ] = data[ i ];
             }
 
             const material = new MeshStandardMaterial({
@@ -358,23 +358,31 @@ async function loadScene() {
 
             const box = new Box3();
             const mesh = new Mesh(geometry, material);
-            mesh.rotation.z = Math.PI / 3;
+            // mesh.rotation.z = Math.PI / 3;
 
             mesh.scale.set(0.5, 0.5, 0.5);
-
-
-            box.setFromObject(mesh);
-            const center = new Vector3();
-            box.getCenter(center);
-            mesh.position.sub(center);
 
 			scene.add( mesh );
 
             const modelGroup = new Group();
-
             modelGroup.add(mesh);
-            modelGroup.rotation.z = - Math.PI / 2;
-            modelGroup.rotation.x = Math.PI / 1.55;
+
+            // Centre le mesh et le groupe
+            const groupBox = new Box3();
+            groupBox.setFromObject(modelGroup);
+            const groupCenter = groupBox.getCenter(new Vector3());
+            mesh.position.sub(groupCenter);
+            modelGroup.position.set(0, 0, 0);
+
+            modelGroup.rotation.set(Math.PI/2, 0, 0);
+            const localYAxis = new Vector3(0, 1, 0);
+            modelGroup.rotateOnAxis(localYAxis, Math.PI/3.61);
+            const localXAxis = new Vector3(1, 0, 0);
+            modelGroup.rotateOnAxis(localXAxis, Math.PI/6);
+    
+            // modelGroup.rotation.z = - Math.PI / 2;
+            // modelGroup.rotation.x = Math.PI / 1.55;
+  
 
             resolve(modelGroup);
         } catch (error) {
