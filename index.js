@@ -1,7 +1,8 @@
-import { Box3, WebGLRenderer, Scene, DirectionalLight, AmbientLight, Group, MeshStandardMaterial, BufferGeometry, LineSegments, LineBasicMaterial, OrthographicCamera, Vector3, Mesh, Float32BufferAttribute } from 'three';
+import { DoubleSide, Box3, WebGLRenderer, Scene, DirectionalLight, AmbientLight, Group, MeshStandardMaterial, BufferGeometry, LineSegments, LineBasicMaterial, OrthographicCamera, Vector3, Mesh, Float32BufferAttribute, SphereGeometry, BoxGeometry, PlaneGeometry } from 'three';
 import { GUI } from 'https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/libs/lil-gui.module.min.js';
 import { mergeGeometries } from 'https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/utils/BufferGeometryUtils.js';
 import { STLLoader } from 'https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/loaders/STLLoader.js';
+import {ImprovedNoise} from 'https://unpkg.com/three/examples/jsm/math/ImprovedNoise.js';
 
 import { ProjectionGenerator } from './ProjectionGenerator.js';
 
@@ -18,6 +19,9 @@ class CustomControls {
         this.isMouseDown = false;
         this.mouseX = 0;
         this.mouseY = 0;
+
+        this.isRotating = false;
+
         
         this.onMouseDown = this.onMouseDown.bind(this);
         this.onMouseMove = this.onMouseMove.bind(this);
@@ -38,55 +42,64 @@ class CustomControls {
         this.isMouseDown = true;
         this.mouseX = event.clientX;
         this.mouseY = event.clientY;
-        
-        if (projection && projection.geometry) {
-            projection.geometry.dispose();
-            projection.geometry = new BufferGeometry();
-        }
-        
-        model.visible = params.displayModel === 'color';
-        shadedWhiteModel.visible = params.displayModel === 'shaded white';
-        whiteModel.visible = params.displayModel === 'white';
-        projection.visible = false;
     }
-    
+
     onMouseMove(event) {
-		if (!this.enabled || !this.isMouseDown) return;
-		
-		const deltaX = event.clientX - this.mouseX;
-		const deltaY = event.clientY - this.mouseY;
-		
-		this.object.rotateOnWorldAxis(
-			new Vector3(0, 0, 1), 
-			-deltaX * 0.01 * this.rotationSpeed
-		);
-		
-		this.object.rotateOnWorldAxis(
-			new Vector3(1, 0, 0), 
-			deltaY * 0.01 * this.rotationSpeed
-			
-		);
-		
-		this.mouseX = event.clientX;
-		this.mouseY = event.clientY;
-	}
-    
+        if (!this.enabled || !this.isMouseDown) return;
+
+        const deltaX = event.clientX - this.mouseX;
+        const deltaY = event.clientY - this.mouseY;
+
+        // Si c'est le premier mouvement après mouseDown
+        if (!this.isRotating && (Math.abs(deltaX) > 2 || Math.abs(deltaY) > 2)) {
+            this.isRotating = true;
+            
+            if (projection && projection.geometry) {
+                projection.geometry.dispose();
+                projection.geometry = new BufferGeometry();
+            }
+            
+            model.visible = params.displayModel === 'color';
+            shadedWhiteModel.visible = params.displayModel === 'shaded white';
+            whiteModel.visible = params.displayModel === 'white';
+            projection.visible = false;
+        }
+
+        if (this.isRotating) {
+            this.object.rotateOnWorldAxis(
+                new Vector3(0, 0, 1), 
+                -deltaX * 0.01 * this.rotationSpeed
+            );
+            
+            this.object.rotateOnWorldAxis(
+                new Vector3(1, 0, 0), 
+                deltaY * 0.01 * this.rotationSpeed
+            );
+        }
+
+        this.mouseX = event.clientX;
+        this.mouseY = event.clientY;
+    }
+
     onMouseUp() {
-        this.isMouseDown = false;
-        
-        if (this.projectionTimeout) {
-            clearTimeout(this.projectionTimeout);
+        if (this.isRotating) {
+            if (this.projectionTimeout) {
+                clearTimeout(this.projectionTimeout);
+            }
+            
+            this.projectionTimeout = setTimeout(async () => {
+                if (!this.isMouseDown) {
+                    await runUpdateEdges(30);
+                    model.visible = false;
+                    shadedWhiteModel.visible = false;
+                    whiteModel.visible = false;
+                    projection.visible = true;
+                }
+            }, 500);
         }
         
-        this.projectionTimeout = setTimeout(async () => {
-            if (!this.isMouseDown) {
-                await runUpdateEdges(30);
-                model.visible = false;
-                shadedWhiteModel.visible = false;
-                whiteModel.visible = false;
-                projection.visible = true;
-            }
-        }, 500);
+        this.isMouseDown = false;
+        this.isRotating = false;
     }
     
     onWheel(event) {
@@ -121,9 +134,12 @@ const params = {
 };
 
 let renderer, camera, scene, gui, controls;
-let model, projection, group, shadedWhiteModel, whiteModel;
+let model, projection, group, shadedWhiteModel;
+let whiteModel = new Group();
 let outputContainer;
 let task = null;
+let currentProjectionTask = null;
+let debounceTimeout = null;
 
 init();
 
@@ -143,7 +159,7 @@ async function init() {
 
     // lights
     const light = new DirectionalLight(0xffffff, 3.5);
-    light.position.set(0, 1, 0);
+    light.position.set(0, 100, 0);
     scene.add(light);
 
     const ambientLight = new AmbientLight(0xb0bec5, 1);
@@ -152,9 +168,9 @@ async function init() {
     group = new Group();
     scene.add(group);
 
-    // STL 
-    model = await loadSTL('https://raw.githubusercontent.com/photonsters/Slicer/master/STLs/bunny.stl');
+    // model = await loadSTL('https://raw.githubusercontent.com/photonsters/Slicer/master/STLs/bunny.stl');
 	// model = await loadSTL('https://raw.githubusercontent.com/ChrisC413/bitey-bunny/master/bitey%20bunny.stl');	
+    model = await loadScene();
 
     const boxM = new Box3();
     boxM.setFromObject(model);
@@ -164,12 +180,10 @@ async function init() {
     boxM.getCenter(centerM);
     model.position.sub(centerM);
 
-    const whiteMaterial = new MeshStandardMaterial({
-        polygonOffset: true,
-        polygonOffsetFactor: 1,
-        polygonOffsetUnits: 1,
-    });
     shadedWhiteModel = model.clone();
+    const whiteMaterial = new MeshStandardMaterial({
+        color: 0xcccccc,
+    });
     shadedWhiteModel.traverse(c => {
         if (c.material) {
             c.material = whiteMaterial;
@@ -198,7 +212,7 @@ async function init() {
 
     // camera setup
     const aspect = window.innerWidth / window.innerHeight;
-    const distance = maxDim ;
+    const distance = maxDim * 1.1 ;
 
     camera = new OrthographicCamera(
         -distance * aspect,
@@ -206,7 +220,7 @@ async function init() {
         distance,
         -distance,
         0.01,
-        maxDim * 10
+        1000
     );
 
     camera.position.set(0, distance, 0);
@@ -217,8 +231,26 @@ async function init() {
     // controls
     controls = new CustomControls(group, renderer.domElement, camera);
     gui = new GUI();
-	gui.add(params, 'threshold', 1, 100).step(1).name('threshold');
-    gui.add({ exportSVG: function() { exportProjectionToSVG(); }}, 'exportSVG');
+	gui.add(params, 'threshold', 1, 100).step(1).name('threshold').onChange(() => {
+        if (debounceTimeout) clearTimeout(debounceTimeout);
+        
+        model.visible = true;
+        shadedWhiteModel.visible = false;
+        whiteModel.visible = false;
+        projection.visible = false;
+        
+        debounceTimeout = setTimeout(async () => {
+            if (debounceTimeout) {
+                await runUpdateEdges(30);
+                model.visible = false;
+                shadedWhiteModel.visible = false;
+                whiteModel.visible = false;
+                projection.visible = true;
+            }
+        }, 500);
+    });
+    gui.add({ importSTL: async function() { await importSTL() }}, 'importSTL').name('Import STL');
+    gui.add({ exportSVG: function() { projection.visible && exportProjectionToSVG() }}, 'exportSVG');
 
     render();
 
@@ -251,7 +283,8 @@ async function loadSTL(url) {
 				
 				const loader = new STLLoader();
 				try {
-					const geometry = loader.parse(buffer);
+					let geometry = loader.parse(buffer);
+
 					console.log("Géométrie importée:", {
 						vertices: geometry.attributes.position.count,
 						faces: geometry.attributes.position.count / 3
@@ -260,9 +293,12 @@ async function loadSTL(url) {
 					const material = new MeshStandardMaterial({
 						color: 0xcccccc,
 					});
+
 					const mesh = new Mesh(geometry, material);
+
 					const modelGroup = new Group();
 					modelGroup.add(mesh);
+
 					resolve(modelGroup);
 				} catch (error) {
 					console.error("Erreur lors du parsing du STL:", error);
@@ -274,6 +310,188 @@ async function loadSTL(url) {
 				reject(error);
 			});
 	});
+}
+
+async function loadScene() {
+	return new Promise((resolve, reject) => {
+		try {
+            function generateHeight( width, height ) {
+
+				const size = width * height, data = new Uint8Array( size ),
+				perlin = new ImprovedNoise(), z = Math.random() * 100;
+
+				let quality = 1;
+
+				for ( let j = 0; j < 4; j ++ ) {
+
+					for ( let i = 0; i < size; i ++ ) {
+
+						const x = i % width, y = ~ ~ ( i / width );
+						data[ i ] += Math.abs( perlin.noise( x / quality, y / quality, z ) * quality * 1.75 );
+
+					}
+
+					quality *= 5;
+
+				}
+
+				return data;
+
+			}
+
+            const worldWidth = 256, worldDepth = 256;
+            const data = generateHeight( worldWidth, worldDepth );
+
+
+            const geometry = new PlaneGeometry( 1000, 1000, worldWidth - 1, worldDepth - 1 );
+            geometry.rotateX( - Math.PI / 2 );
+
+            const vertices = geometry.attributes.position.array;
+
+            for ( let i = 0, j = 0, l = vertices.length; i < l; i ++, j += 3 ) {
+                vertices[ j + 1 ] = data[ i ] * 1;
+            }
+
+            const material = new MeshStandardMaterial({
+                color: 0xcccccc,
+            });
+
+            const box = new Box3();
+            const mesh = new Mesh(geometry, material);
+            mesh.rotation.z = Math.PI / 3;
+
+            mesh.scale.set(0.5, 0.5, 0.5);
+
+
+            box.setFromObject(mesh);
+            const center = new Vector3();
+            box.getCenter(center);
+            mesh.position.sub(center);
+
+			scene.add( mesh );
+
+            const modelGroup = new Group();
+
+            modelGroup.add(mesh);
+            modelGroup.rotation.z = - Math.PI / 2;
+            modelGroup.rotation.x = Math.PI / 1.55;
+
+            resolve(modelGroup);
+        } catch (error) {
+            console.error("Erreur lors du parsing du STL:", error);
+            reject(error);
+        }
+	});
+}
+
+async function importSTL() {
+    return new Promise(async (resolve) => {
+        // Arrêter la projection en cours si elle existe
+        if (controls.projectionTimeout) {
+            clearTimeout(controls.projectionTimeout);
+        }
+
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.stl';
+        
+        input.onchange = async (e) => {
+            const file = e.target.files[0];
+            
+            // Clean up existing scene
+            projection.visible = false;
+            if (projection.geometry) {
+                projection.geometry.dispose();
+                projection.geometry = new BufferGeometry();
+            }
+            
+            // Clean up existing models
+            if (model) {
+                model.traverse(child => {
+                    if (child.geometry) child.geometry.dispose();
+                    if (child.material) child.material.dispose();
+                });
+            }
+            if (shadedWhiteModel) {
+                shadedWhiteModel.traverse(child => {
+                    if (child.geometry) child.geometry.dispose();
+                    if (child.material) child.material.dispose();
+                });
+            }
+            if (whiteModel) {
+                whiteModel.traverse(child => {
+                    if (child.geometry) child.geometry.dispose();
+                    if (child.material) child.material.dispose();
+                });
+            }
+
+            const buffer = await file.arrayBuffer();
+            const loader = new STLLoader();
+            const geometry = loader.parse(buffer);
+            
+            const material = new MeshStandardMaterial({
+                color: 0xcccccc,
+            });
+            const mesh = new Mesh(geometry, material);
+            const modelGroup = new Group();
+            modelGroup.add(mesh);
+            
+            // Reset group position and rotation
+            group.position.set(0, 0, 0);
+            group.rotation.set(0, 0, 0);
+            
+            // Center and scale the model
+            const box = new Box3();
+            box.setFromObject(modelGroup);
+            const size = new Vector3();
+            box.getSize(size);
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const center = new Vector3();
+            box.getCenter(center);
+            modelGroup.position.sub(center);
+
+            // Create shaded white model
+            const whiteMaterial = new MeshStandardMaterial({
+                color: 0xcccccc,
+            });
+            shadedWhiteModel = modelGroup.clone();
+            shadedWhiteModel.traverse(c => {
+                if (c.material) {
+                    c.material = whiteMaterial;
+                }
+            });
+
+            // Update camera
+            const aspect = window.innerWidth / window.innerHeight;
+            const distance = maxDim * 1.1;
+            camera.left = -distance * aspect;
+            camera.right = distance * aspect;
+            camera.top = distance;
+            camera.bottom = -distance;
+            camera.position.set(0, distance, 0);
+            camera.lookAt(0, 0, 0);
+            camera.updateProjectionMatrix();
+
+            // Update scene with proper order
+            group.remove(model, shadedWhiteModel, whiteModel);
+            model = modelGroup;
+            group.add(model, shadedWhiteModel, whiteModel);
+            
+            // Initial rotation comme dans init()
+            group.rotateOnWorldAxis(new Vector3(1, 0, 0), Math.PI);
+            group.rotateOnWorldAxis(new Vector3(0, 0, 1), Math.PI/3.6);
+            
+            await runUpdateEdges(30);
+            model.visible = false;
+            shadedWhiteModel.visible = false;
+            whiteModel.visible = false;
+            projection.visible = true;
+
+            resolve();
+        };
+        
+        input.click();
+    });
 }
 
 function* updateEdges( runTime = 30 ) {
@@ -373,6 +591,16 @@ function* updateEdges( runTime = 30 ) {
 }
 
 function runUpdateEdges(runTime = 30) {
+    if (currentProjectionTask) {
+        projection.geometry.dispose();
+        projection.geometry = new BufferGeometry();
+        projection.visible = false;
+        model.visible = params.displayModel === 'color';
+        shadedWhiteModel.visible = params.displayModel === 'shaded white';
+        whiteModel.visible = params.displayModel === 'white';
+        currentProjectionTask = null;
+    }
+    
 	return new Promise((resolve) => {
 	  const iterator = updateEdges(runTime);
   
