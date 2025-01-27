@@ -126,7 +126,7 @@ class CustomControls {
 }
 
 const params = {
-	threshold: 50,
+	threshold: 10,
 	displayModel: 'color',
 	displayProjection: false,
 	sortEdges: true,
@@ -134,7 +134,7 @@ const params = {
 };
 
 let renderer, camera, scene, gui, controls;
-let model, projection, group, shadedWhiteModel;
+let model, projection, polylineProjection, group, shadedWhiteModel;
 let whiteModel = new Group();
 let outputContainer;
 let task = null;
@@ -145,7 +145,7 @@ init();
 
 async function init() {
     outputContainer = document.getElementById('output');
-    const bgColor = 0xeeeeee;
+    const bgColor = 0x9c9c9c;
 
     // renderer setup
     renderer = new WebGLRenderer({ antialias: true });
@@ -206,9 +206,11 @@ async function init() {
     group.add(model, shadedWhiteModel, whiteModel);
 
     // create projection display mesh
-    projection = new LineSegments(new BufferGeometry(), new LineBasicMaterial({ color: 0x030303 }));
-	projection.name = 'mainProjection';  // ajouter cet identifiant
+    projection = new LineSegments(new BufferGeometry(), new LineBasicMaterial({ color: 0x000000}));
     scene.add(projection);
+
+    polylineProjection = new LineSegments(new BufferGeometry(), new LineBasicMaterial({ color: 0xffff00}));
+    scene.add(polylineProjection);
 
     // camera setup
     const aspect = window.innerWidth / window.innerHeight;
@@ -251,6 +253,7 @@ async function init() {
     });
     gui.add({ importSTL: async function() { await importSTL() }}, 'importSTL').name('Import STL');
     gui.add({ exportSVG: function() { projection.visible && exportProjectionToSVG() }}, 'exportSVG');
+    gui.add({ exportSVG: function() { projection.visible && exportSingleProjectionToSVG() }}, 'exportSVG');
 
     render();
 
@@ -591,7 +594,9 @@ function* updateEdges( runTime = 30 ) {
 	const trimTime = window.performance.now() - timeStart;
 
 	projection.geometry.dispose();
+
 	projection.geometry = geometry;
+
 	outputContainer.innerText =
 		`merge geometry  : ${ mergeTime.toFixed( 2 ) }ms\n` +
 		`edge trimming   : ${ trimTime.toFixed( 2 ) }ms`;
@@ -609,21 +614,24 @@ function runUpdateEdges(runTime = 30) {
         currentProjectionTask = null;
     }
     
-	return new Promise((resolve) => {
-	  const iterator = updateEdges(runTime);
+    return new Promise((resolve) => {
+        const iterator = updateEdges(runTime);
   
-	  function runNextStep() {
-		const result = iterator.next();
+        function runNextStep() {
+            const result = iterator.next();
   
-		if (!result.done) {
-		  requestAnimationFrame(runNextStep);
-		} else {
-		  resolve();
-		}
-	  }
+            if (!result.done) {
+                requestAnimationFrame(runNextStep);
+            } else {
+                // Post-traitement avec la géométrie finale
+                processProjectionLines(projection.geometry);
+                polylineProjection.visible = true;
+                resolve();
+            }
+        }
   
-	  runNextStep();
-	});
+        runNextStep();
+    });
 }
 
 async function exportProjectionToSVG() {
@@ -676,6 +684,177 @@ async function exportProjectionToSVG() {
     link.download = 'projection.svg';
     link.click();
     URL.revokeObjectURL(url);
+}
+
+async function exportSingleProjectionToSVG(distance = 10) {
+    const positions = polylineProjection.geometry.attributes.position.array;
+    const uniquePoints = new Set();
+    
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (let i = 0; i < positions.length; i += 3) {
+        const x = positions[i];
+        const z = positions[i + 2];
+        minX = Math.min(minX, x);
+        maxX = Math.max(maxX, x);
+        minY = Math.min(minY, z);
+        maxY = Math.max(maxY, z);
+    }
+    
+    const targetWidth = 1000;
+    const scale = targetWidth / (maxX - minX);
+    
+    // Collecter les points uniques
+    for (let i = 0; i < positions.length; i += 6) {
+        const x1 = positions[i] * scale;
+        const z1 = positions[i + 2] * scale;
+        const x2 = positions[i + 3] * scale;
+        const z2 = positions[i + 5] * scale;
+        
+        uniquePoints.add(`${x1},${z1}`);
+        uniquePoints.add(`${x2},${z2}`);
+    }
+    
+    const points = Array.from(uniquePoints).map(p => {
+        const [x, y] = p.split(',').map(Number);
+        return {x, y};
+    });
+    
+    const polylines = [];
+    let currentPolyline = [];
+    let remainingPoints = [...points];
+    
+    while (remainingPoints.length > 0) {
+        if (currentPolyline.length === 0) {
+            currentPolyline.push(remainingPoints[0]);
+            remainingPoints.splice(0, 1);
+        }
+        
+        let nearestIndex = -1;
+        let minDist = Infinity;
+        
+        remainingPoints.forEach((point, index) => {
+            const last = currentPolyline[currentPolyline.length - 1];
+            const dist = Math.hypot(point.x - last.x, point.y - last.y);
+            if (dist < minDist) {
+                minDist = dist;
+                nearestIndex = index;
+            }
+        });
+        
+        if (nearestIndex !== -1 && minDist <= distance * scale) {
+            currentPolyline.push(remainingPoints[nearestIndex]);
+            remainingPoints.splice(nearestIndex, 1);
+        } else {
+            if (currentPolyline.length > 1) {
+                polylines.push(currentPolyline);
+            }
+            currentPolyline = [];
+        }
+    }
+    
+    if (currentPolyline.length > 1) {
+        polylines.push(currentPolyline);
+    }
+    
+    const margin = targetWidth * 0.1;
+    const viewBoxWidth = (maxX - minX) * scale + 2 * margin;
+    const viewBoxHeight = (maxY - minY) * scale + 2 * margin;
+    
+    const svgPolylines = polylines.map(polyline => {
+        const points = polyline.map(p => `${p.x},${p.y}`).join(' ');
+        return `<polyline points="${points}" />`;
+    });
+    
+    const svg = `<?xml version="1.0" encoding="UTF-8"?>
+    <svg xmlns="http://www.w3.org/2000/svg" 
+        viewBox="${minX * scale - margin} ${minY * scale - margin} ${viewBoxWidth} ${viewBoxHeight}">
+    <g fill="none" stroke="red" stroke-width="2">
+        ${svgPolylines.join('\n    ')}
+    </g>
+    </svg>`;
+    
+    const blob = new Blob([svg], {type: 'image/svg+xml'});
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'projection.svg';
+    link.click();
+    URL.revokeObjectURL(url);
+}
+
+function processProjectionLines(originalGeometry, distance = 10) {
+    const positions = projection.geometry.attributes.position.array;
+    const lines = [];
+    const uniquePoints = new Set();
+    
+    for (let i = 0; i < positions.length; i += 6) {
+        const start = new Vector3(positions[i], positions[i + 1], positions[i + 2]);
+        const end = new Vector3(positions[i + 3], positions[i + 4], positions[i + 5]);
+        
+        if (!start.equals(end)) {
+            lines.push({ start, end });
+            uniquePoints.add(`${start.x},${start.y},${start.z}`);
+            uniquePoints.add(`${end.x},${end.y},${end.z}`);
+        }
+    }
+    
+    const points = Array.from(uniquePoints).map(p => {
+        const [x, y, z] = p.split(',').map(Number);
+        return new Vector3(x, y, z);
+    });
+    
+    const polylines = [];
+    let currentPolyline = [];
+    let remainingPoints = [...points];
+    
+    while (remainingPoints.length > 0) {
+        if (currentPolyline.length === 0) {
+            currentPolyline.push(remainingPoints[0]);
+            remainingPoints.splice(0, 1);
+        }
+        
+        let nearestIndex = -1;
+        let minDist = Infinity;
+        
+        remainingPoints.forEach((point, index) => {
+            const dist = currentPolyline[currentPolyline.length - 1].distanceTo(point);
+            if (dist < minDist) {
+                minDist = dist;
+                nearestIndex = index;
+            }
+        });
+        
+        if (nearestIndex !== -1 && minDist <= distance) {
+            currentPolyline.push(remainingPoints[nearestIndex]);
+            remainingPoints.splice(nearestIndex, 1);
+        } else {
+            if (currentPolyline.length > 1) {
+                polylines.push(currentPolyline);
+            }
+            currentPolyline = [];
+        }
+    }
+    
+    if (currentPolyline.length > 1) {
+        polylines.push(currentPolyline);
+    }
+    console.log("Nombre de polylines:", polylines.length);
+
+    const polylinePositions = [];
+    polylines.forEach(polyline => {
+        for (let i = 0; i < polyline.length - 1; i++) {
+            polylinePositions.push(
+                polyline[i].x, polyline[i].y, polyline[i].z,
+                polyline[i + 1].x, polyline[i + 1].y, polyline[i + 1].z
+            );
+        }
+    });
+    
+    polylineProjection.geometry.dispose();
+    polylineProjection.geometry = new BufferGeometry();
+    polylineProjection.geometry.setAttribute('position', new Float32BufferAttribute(polylinePositions, 3));
+    
+    return originalGeometry;
 }
 
 function render() {
